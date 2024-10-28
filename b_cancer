@@ -1,0 +1,177 @@
+import pandas as pd
+import seaborn as sns
+import numpy as np
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+import warnings
+warnings.filterwarnings('ignore')
+
+df = pd.read_csv('/content/data.csv')
+df
+
+pd.set_option('display.max_columns', None)
+df.head()
+
+df.shape
+df.info()
+df.isnull().sum()
+df.describe()
+df = df.drop(['id', 'Unnamed: 32'], axis=1)
+
+# rename target column
+df = df.rename(columns={'diagnosis': 'target'})
+# target column replace with 0 and 1
+df['target'] = df['target'].replace({'B': 0, 'M': 1})
+
+# Define a color palette (you can customize this list of colors)
+colors = ["#1f77b4", "#ff7f0e"]
+
+# Create the plot with different colors for each bar
+ax = sns.countplot(x='target', data=df, palette=colors)
+
+# Add count on each bar
+for p in ax.patches:
+    ax.annotate(f'{p.get_height()}',
+                (p.get_x() + p.get_width() / 2., p.get_height()),
+                ha='center', va='center', fontsize=10, color='black', xytext=(0, 5),
+                textcoords='offset points')
+
+# Show the plot
+plt.show()
+
+plt.figure(figsize=(20, 17))
+matrix = np.triu(df.corr())
+sns.heatmap(df.corr(), annot=True, mask=matrix, linewidth=.8, cmap="rocket");
+
+x = df.drop(["target"], axis = 1)
+y = df.target
+columns = x.columns.tolist()
+
+# Fit the LocalOutlierFactor model to your data
+lof = LocalOutlierFactor()
+lof.fit(x)
+
+# Get the negative outlier factor scores
+X_score = lof.negative_outlier_factor_
+
+# Create a scatter plot of the data points
+plt.figure(figsize=(8, 6))
+plt.scatter(x.iloc[:, 0], x.iloc[:, 1], color="k", s=3, label="Data Point")
+
+# Calculate the radius for each point based on the outlier score
+radius = (X_score.max() - X_score) / (X_score.max() - X_score.min())
+
+# Plot the points with sizes corresponding to the outlier score
+plt.scatter(x.iloc[:, 0], x.iloc[:, 1], s=1000 * radius, edgecolors="r", facecolors="none", label="Outlier Score")
+
+plt.xlabel(columns[0])
+plt.ylabel(columns[1])
+plt.legend()
+plt.grid(True)
+plt.title('Outlier Detection using Local Outlier Factor (LOF)')
+plt.show()
+
+# Threshold for outlier detection
+threshold_outlier = -2.5
+filtre = X_score < threshold_outlier
+outlier_index = np.where(filtre)[0]
+print("Outlier indices:", outlier_index)
+
+plt.figure(figsize=(10, 10))
+
+# Plot outliers in blue
+plt.scatter(x.iloc[outlier_index, 0], x.iloc[outlier_index, 1], color="blue", s=50, label="Outliers")
+
+# Plot all data points
+plt.scatter(x.iloc[:, 0], x.iloc[:, 1], color="k", s=3, label="Data Point")
+
+# Plot outlier scores with sizes corresponding to the outlier score
+plt.scatter(x.iloc[:, 0], x.iloc[:, 1], s=1000 * radius, edgecolors="r", facecolors="none", label="Outlier Score")
+
+plt.xlabel(columns[0])
+plt.ylabel(columns[1])
+plt.legend()
+plt.grid(True)
+plt.title('Outlier Detection using Local Outlier Factor (LOF)')
+plt.show()
+
+# Drop outliers from the features dataset
+x = x.drop(outlier_index)
+
+# Drop corresponding labels from the target dataset
+y = y.drop(outlier_index).values
+
+# Standardize the features
+x_standardized = (x - x.mean()) / x.std()
+
+# Apply PCA without specifying the number of components
+pca = PCA()
+pca.fit(x_standardized)
+
+# Calculate explained variance ratio
+explained_variance_ratio = pca.explained_variance_ratio_
+
+# Find the optimal number of components
+cumulative_variance_ratio = np.cumsum(explained_variance_ratio)
+optimal_components = np.argmax(cumulative_variance_ratio >= 0.95) + 1
+
+# Plot explained variance ratio
+plt.figure(figsize=(8, 6))
+plt.plot(np.cumsum(explained_variance_ratio), marker='o', linestyle='-')
+plt.xlabel('Number of Components')
+plt.ylabel('Cumulative Explained Variance Ratio')
+plt.title('PCA Explained Variance Ratio')
+
+# Annotate the plot with the optimal number of components
+plt.annotate(f'Optimal Components: {optimal_components}',
+             xy=(optimal_components, cumulative_variance_ratio[optimal_components-1]),
+             xytext=(optimal_components + 2, cumulative_variance_ratio[optimal_components-1] - 0.05),
+             arrowprops=dict(facecolor='black', arrowstyle='->'),
+             fontsize=12)
+
+plt.grid(True)
+plt.show()
+
+# Apply PCA with the optimal number of components
+pca = PCA(n_components=10)
+principal_components = pca.fit_transform(x_standardized)
+
+# Create a DataFrame to hold the principal components
+principal_df = pd.DataFrame(data=principal_components, columns=[f'PC{i}' for i in range(1, 11)])
+
+# Concatenate principal components with the target variable
+final_df = pd.concat([principal_df, pd.DataFrame(y, columns=['target'])], axis=1)
+
+# Plot the PCA result
+plt.figure(figsize=(8, 6))
+sns.scatterplot(x='PC1', y='PC2', hue='target', data=final_df, palette='Set1')
+plt.title('PCA Visualization (Optimal Components)')
+plt.xlabel('Principal Component 1')
+plt.ylabel('Principal Component 2')
+plt.legend(title='Target', loc='upper right')
+plt.show()
+
+x_train, x_test, y_train, y_test = train_test_split(principal_components, y, test_size=0.2, random_state=42)
+
+model = LogisticRegression()
+model.fit(x_train, y_train)
+
+y_pred = model.predict(x_test)
+
+accuracy = accuracy_score(y_test, y_pred)
+print("Accuracy:", accuracy)
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+# Assuming 'df' is your DataFrame and 'target' is the column with the diagnosis labels
+case_counts = df['target'].value_counts()
+
+# Display the counts
+print("Count of cases:")
+print(case_counts)
+
